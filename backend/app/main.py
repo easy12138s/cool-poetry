@@ -1,16 +1,29 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine
-from app.routers import chat
+from .database import engine, get_db
+from .routers import chat
+from .services.config import ConfigManager
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from .database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        await ConfigManager.initialize(db)
+        logger.info("ConfigManager initialized")
+
     yield
+
+    await ConfigManager.shutdown()
     await engine.dispose()
+    logger.info("Application shutdown")
 
 
 app = FastAPI(

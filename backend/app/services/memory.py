@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Conversation, Device, User
+from ..models import Conversation, Device, User
 
 MAX_HISTORY_TURNS = 10
 

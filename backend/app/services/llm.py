@@ -2,7 +2,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from app.config import settings
+from ..config import settings
 
 client = AsyncOpenAI(
     api_key=settings.dashscope_api_key,

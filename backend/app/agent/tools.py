@@ -1,12 +1,12 @@
 import json
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agent.base import tool
-from app.models import Author, Poem, Paragraph
+from .base import tool
+from ..models import Author, Poem, Paragraph
 
 
 @tool(
@@ -146,8 +146,6 @@ async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
     },
 )
 async def get_random_poem(db: AsyncSession, difficulty: Optional[int] = None) -> str:
-    from sqlalchemy import func
-
     query = (
         select(Poem)
         .options(selectinload(Poem.author), selectinload(Poem.paragraphs))

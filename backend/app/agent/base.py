@@ -41,6 +41,15 @@ class ToolRegistry:
         return [tool.to_openai_tool() for tool in cls._tools.values()]
 
     @classmethod
+    def get_tools_by_codes(cls, tool_codes: list[str]) -> list[dict]:
+        tools = []
+        for code in tool_codes:
+            tool = cls._tools.get(code)
+            if tool:
+                tools.append(tool.to_openai_tool())
+        return tools
+
+    @classmethod
     def clear(cls):
         cls._tools = {}
 
