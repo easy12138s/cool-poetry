@@ -129,15 +129,26 @@ class PoetAgent(BaseAgent):
     async def _execute_tool(self, tool_name: str, arguments: str) -> str:
         tool = ToolRegistry.get(tool_name)
         if not tool:
-            return f"未知的工具：{tool_name}"
+            return json.dumps({
+                "success": False,
+                "message": f"未知的工具：{tool_name}"
+            })
 
         try:
             args = json.loads(arguments) if isinstance(arguments, str) else arguments
+
+            # 对于用户画像相关工具，自动传入 user_id
+            if tool_name in ["update_user_profile", "get_user_profile", "record_learning_progress"]:
+                args["user_id"] = self.user_id
+
             result = await tool.execute(db=self.db, **args)
             return result
         except Exception as e:
             logger.error(f"Tool execution error: {e}")
-            return f"工具执行错误：{str(e)}"
+            return json.dumps({
+                "success": False,
+                "message": f"工具执行错误：{str(e)}"
+            })
 
     def _extract_poem_data(
         self,

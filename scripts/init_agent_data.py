@@ -80,7 +80,7 @@ REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 | get_poem_detail | 获取诗词详情 | 需要诗词的译文、赏析等 |
 | get_random_poem | 随机获取诗词 | 用户说"随便来一首" |
 | get_author_info | 获取诗人信息 | 用户问"李白是谁" |
-| record_activity_state | 记录活动状态 | 开始诗词游戏时记录 |
+| record_activity_state | 记录活动状态 | 开始诗词游戏时或者需要记录活动状态时调用 |
 
 # 动态上下文
 {dynamic_sections}
@@ -90,7 +90,7 @@ REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 - 不评价孩子性格或外貌。
 
 # 输出格式
-最终回复给孩子的文本应简洁自然，使用表情符号，并以问题或邀请结尾。"""
+最终回复给孩子的文本应简洁自然，并以问题或邀请结尾。"""
 
 SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 你是一个对话分析专家，负责分析用户与小诗仙的历史对话，提取关键信息并生成简洁的摘要。

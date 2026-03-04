@@ -12,6 +12,19 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 3. 多鼓励开口：主动邀请孩子"我们一起读一遍好吗？"或"你来试试下一句？"
 4. 简短易懂：每次回复不超过100字，多用比喻，少用术语。
 
+# 了解孩子（重要）
+- 如果是第一次对话，主动询问孩子的名字、年龄、喜欢什么。
+- 当孩子提供这些信息时，使用 update_user_profile 工具记录下来。
+- 根据孩子的年龄调整难度：6-8岁推荐简单短诗，9-12岁可以稍微复杂。
+- 如果孩子提到喜欢的诗人或主题，记录下来，以后优先推荐相关诗词。
+- 当需要了解孩子的学习情况（如已学多少首诗、掌握程度）时，使用 get_user_profile 工具查询。
+
+# 个性化推荐
+- 根据孩子的年龄推荐合适难度的诗。
+- 如果孩子喜欢某位诗人，多推荐这位诗人的作品。
+- 根据学习进度，适时推荐新诗词或复习旧诗词。
+- 当孩子学会一首诗后，使用 record_learning_progress 工具记录。
+
 # 行为指南
 - 推荐古诗：根据当前天气、季节或场景推荐，例如下雨时说"今天下雨，我们念一首关于雨的诗吧：……"
 - 讲诗人故事：用一两句话讲诗人的趣闻（"李白小时候也怕背书，但他坚持每天读……"）。
@@ -74,16 +87,70 @@ class PromptBuilder:
         return self.system_prompt_template.format(dynamic_sections=dynamic_sections)
 
     def _format_profile(self, profile: dict) -> str:
+        """格式化用户画像信息，预加载到系统提示词中。"""
+        if not profile:
+            return "【新用户】还没有你的信息，可以告诉我你的名字和年龄吗？"
+
         parts = []
+
+        # 基础信息
         if profile.get("nickname"):
             parts.append(f"昵称：{profile['nickname']}")
         if profile.get("age"):
-            parts.append(f"年龄：{profile['age']}岁")
+            age = profile['age']
+            parts.append(f"年龄：{age}岁")
+            # 根据年龄给出推荐难度
+            if age <= 7:
+                parts.append("推荐难度：1-2级（简单短诗，如《咏鹅》《静夜思》）")
+            elif age <= 9:
+                parts.append("推荐难度：2-3级（中等诗词，如《春晓》《悯农》）")
+            else:
+                parts.append("推荐难度：3-4级（可尝试较难诗词，如《望庐山瀑布》《早发白帝城》）")
+
+        # 喜欢的诗人
         if profile.get("favorite_poets"):
-            poets = "、".join(profile["favorite_poets"][:3])
-            parts.append(f"喜欢的诗人：{poets}")
-        # 移除 learning_progress，避免行为不稳定
-        return "\n".join(parts) if parts else ""
+            poets = profile["favorite_poets"]
+            if isinstance(poets, list) and poets:
+                poet_names = "、".join(poets[:3])
+                parts.append(f"喜欢的诗人：{poet_names}")
+
+        # 喜欢的诗词
+        if profile.get("favorite_poems"):
+            poems = profile["favorite_poems"]
+            if isinstance(poems, list) and poems:
+                poem_titles = []
+                for p in poems[:3]:
+                    if isinstance(p, dict):
+                        poem_titles.append(p.get("title", ""))
+                    elif isinstance(p, str):
+                        poem_titles.append(p)
+                if poem_titles:
+                    parts.append(f"喜欢的诗词：{'、'.join(poem_titles)}")
+
+        # 学习进度（简要信息）
+        if profile.get("learning_progress"):
+            progress = profile["learning_progress"]
+            if isinstance(progress, dict):
+                total = progress.get("total_learned", 0)
+                if total > 0:
+                    parts.append(f"已学诗词：{total}首")
+                    # 显示最近学习的诗词
+                    poems_learned = progress.get("poems_learned", [])
+                    if poems_learned:
+                        recent = poems_learned[-3:]  # 最近3首
+                        recent_titles = [p.get("title", "") for p in recent if isinstance(p, dict)]
+                        if recent_titles:
+                            parts.append(f"最近学习：{'、'.join(recent_titles)}")
+
+        # 偏好
+        if profile.get("preferences"):
+            prefs = profile["preferences"]
+            if isinstance(prefs, dict):
+                mentioned = prefs.get("mentioned", [])
+                if mentioned:
+                    parts.append(f"偏好：{mentioned[-1]}")  # 只显示最近一条
+
+        return "\n".join(parts) if parts else "【用户信息】可以告诉我更多关于你的信息吗？"
 
     def build_messages(
         self,
