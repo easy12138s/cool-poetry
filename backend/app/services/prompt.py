@@ -82,10 +82,7 @@ class PromptBuilder:
         if profile.get("favorite_poets"):
             poets = "、".join(profile["favorite_poets"][:3])
             parts.append(f"喜欢的诗人：{poets}")
-        if profile.get("learning_progress"):
-            progress = profile["learning_progress"]
-            if progress.get("poems_learned"):
-                parts.append(f"已学诗词：{progress['poems_learned']}首")
+        # 移除 learning_progress，避免行为不稳定
         return "\n".join(parts) if parts else ""
 
     def build_messages(

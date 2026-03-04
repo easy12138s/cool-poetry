@@ -46,7 +46,6 @@ class ContextManager:
         self._initialized = True
 
     async def _load_history(self, limit: int = 10) -> None:
-        return
         result = await self.db.execute(
             select(Conversation)
             .where(Conversation.user_id == self.user_id)
@@ -54,13 +53,13 @@ class ContextManager:
             .limit(limit * 2)
         )
         all_convs = list(reversed(result.scalars().all()))
-        
+
         valid_messages = []
         for i, conv in enumerate(all_convs):
             message = self._conversation_to_message(conv)
             if not message:
                 continue
-            
+
             if message.role == MessageRole.ASSISTANT and message.tool_calls:
                 has_tool_response = False
                 for j in range(i + 1, len(all_convs)):
@@ -72,14 +71,14 @@ class ContextManager:
                                 break
                     if next_msg.role == "assistant":
                         break
-                
+
                 if not has_tool_response:
                     continue
-            
+
             valid_messages.append(message)
             if len(valid_messages) >= limit:
                 break
-        
+
         for msg in valid_messages:
             self.short_term.append(msg)
 
@@ -229,7 +228,7 @@ class ContextManager:
         return [msg.to_openai_format() for msg in self.short_term]
 
     def build_messages(self, user_message: str) -> list[dict]:
-        history = []
+        history = self.get_history()
         return prompt_builder.build_messages(
             user_message=user_message,
             conversation_history=history,
