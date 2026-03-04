@@ -46,19 +46,42 @@ class ContextManager:
         self._initialized = True
 
     async def _load_history(self, limit: int = 10) -> None:
+        return
         result = await self.db.execute(
             select(Conversation)
             .where(Conversation.user_id == self.user_id)
-            .where(Conversation.tool_calls.is_(None))
             .order_by(Conversation.created_at.desc())
-            .limit(limit)
+            .limit(limit * 2)
         )
-        conversations = list(reversed(result.scalars().all()))
-
-        for conv in conversations:
+        all_convs = list(reversed(result.scalars().all()))
+        
+        valid_messages = []
+        for i, conv in enumerate(all_convs):
             message = self._conversation_to_message(conv)
-            if message:
-                self.short_term.append(message)
+            if not message:
+                continue
+            
+            if message.role == MessageRole.ASSISTANT and message.tool_calls:
+                has_tool_response = False
+                for j in range(i + 1, len(all_convs)):
+                    next_msg = all_convs[j]
+                    if next_msg.role == "tool" and next_msg.tool_call_id:
+                        for tc in message.tool_calls:
+                            if tc.id == next_msg.tool_call_id:
+                                has_tool_response = True
+                                break
+                    if next_msg.role == "assistant":
+                        break
+                
+                if not has_tool_response:
+                    continue
+            
+            valid_messages.append(message)
+            if len(valid_messages) >= limit:
+                break
+        
+        for msg in valid_messages:
+            self.short_term.append(msg)
 
     def _conversation_to_message(self, conv: Conversation) -> Optional[Message]:
         role_map = {
@@ -206,7 +229,7 @@ class ContextManager:
         return [msg.to_openai_format() for msg in self.short_term]
 
     def build_messages(self, user_message: str) -> list[dict]:
-        history = self.get_history()
+        history = []
         return prompt_builder.build_messages(
             user_message=user_message,
             conversation_history=history,
