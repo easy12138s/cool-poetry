@@ -138,26 +138,28 @@ class PoetAgent(BaseAgent):
 
     async def _maybe_summarize(self) -> None:
         try:
-            threshold = get_config("summary.trigger_threshold", 20)
-            count = await self._count_messages_since_last_summary()
+            from ..database import async_session
+            from .summarizer import SummarizerAgent
 
-            if count >= threshold:
-                from .summarizer import SummarizerAgent
+            async with async_session() as db:
+                threshold = get_config("summary.trigger_threshold", 20)
+                count = await self._count_messages_since_last_summary(db)
 
-                summarizer = SummarizerAgent(self.db, self.user_id)
-                await summarizer.initialize()
-                messages = self._get_messages_for_summary()
-                if messages:
-                    await summarizer.summarize_and_save(messages)
+                if count >= threshold:
+                    summarizer = SummarizerAgent(db, self.user_id)
+                    await summarizer.initialize()
+                    messages = self._get_messages_for_summary()
+                    if messages:
+                        await summarizer.summarize_and_save(messages)
         except Exception as e:
             logger.warning(f"会话压缩失败: {e}")
 
-    async def _count_messages_since_last_summary(self) -> int:
+    async def _count_messages_since_last_summary(self, db) -> int:
         from sqlalchemy import func, select
 
         from ..models.summary import ConversationSummary
 
-        result = await self.db.execute(
+        result = await db.execute(
             select(ConversationSummary)
             .where(ConversationSummary.user_id == self.user_id)
             .order_by(ConversationSummary.created_at.desc())
@@ -168,7 +170,7 @@ class PoetAgent(BaseAgent):
         if latest_summary:
             from ..models.conversation import Conversation
 
-            count_result = await self.db.execute(
+            count_result = await db.execute(
                 select(func.count())
                 .select_from(Conversation)
                 .where(Conversation.user_id == self.user_id)
@@ -178,7 +180,7 @@ class PoetAgent(BaseAgent):
         else:
             from ..models.conversation import Conversation
 
-            count_result = await self.db.execute(
+            count_result = await db.execute(
                 select(func.count())
                 .select_from(Conversation)
                 .where(Conversation.user_id == self.user_id)
