@@ -2,7 +2,7 @@ from .base import Tool, ToolRegistry, tool
 from .base_agent import BaseAgent
 from .executor import execute_tool_call, PoetAgent, run_agent
 from .summarizer import SummarizerAgent
-from .tools import (
+from .agent_tools import (
     search_poem,
     get_poem_detail,
     get_random_poem,
