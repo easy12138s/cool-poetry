@@ -50,24 +50,53 @@ class PoetAgent(BaseAgent):
         poem_data = None
         call_count = 0
 
+        # 收集所有 tool_calls 用于最后统一保存
+        all_tool_calls = []
+
         while tool_calls and call_count < self._max_tool_calls:
             call_count += 1
 
+            # 添加 assistant 的 tool_calls 到消息历史（用于 LLM 上下文）
+            assistant_message = {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"]
+                        }
+                    }
+                    for tc in tool_calls
+                ]
+            }
+            messages.append(assistant_message)
+
+            # 收集 tool_calls 用于最后保存
             for tc in tool_calls:
-                tool_name = tc["name"]
-                arguments = tc["arguments"]
+                tool_call_obj = ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                all_tool_calls.append(tool_call_obj)
 
-                tool_result = await self._execute_tool(tool_name, arguments)
+                tool_result = await self._execute_tool(tc["name"], tc["arguments"])
 
-                tool_call_obj = ToolCall(id=tc["id"], name=tool_name, arguments=arguments)
-                self.context.add_assistant_message(tool_calls=[tool_call_obj])
-                await self.context.save_assistant_message(tool_calls=[tool_call_obj])
+                # 添加 tool 消息到 LLM 上下文（符合 OpenAI 格式）
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "name": tc["name"],
+                    "content": tool_result
+                }
+                messages.append(tool_message)
 
+                # 保存 tool 消息到数据库
                 self.context.add_tool_message(tc["id"], tool_result)
                 await self.context.save_tool_message(tc["id"], tool_result)
 
-                if tool_name in ["search_poem", "get_poem_detail", "get_random_poem"]:
-                    extracted = self._extract_poem_data(tool_name, arguments, tool_result)
+                # 提取诗词数据
+                if tc["name"] in ["search_poem", "get_poem_detail", "get_random_poem"]:
+                    extracted = self._extract_poem_data(tc["name"], tc["arguments"], tool_result)
                     if extracted:
                         poem_data = extracted
                         self.context.set_last_poem(
@@ -76,12 +105,21 @@ class PoetAgent(BaseAgent):
                             extracted.get("author", ""),
                         )
 
+            # 再次调用 LLM
             messages = self.context.build_messages("")
             response = await chat_completion(messages, tools=tools if tools else None, **model_config)
             content = response["content"]
             tool_calls = response["tool_calls"]
 
-        await self.context.save_assistant_message(content)
+        # 最后统一保存一条 assistant 消息（避免重复记录）
+        if all_tool_calls:
+            # 有工具调用，保存包含 tool_calls 和 content 的完整消息
+            self.context.add_assistant_message(content=content, tool_calls=all_tool_calls)
+            await self.context.save_assistant_message(content=content, tool_calls=all_tool_calls)
+        elif content:
+            # 没有工具调用，只保存 content
+            self.context.add_assistant_message(content=content)
+            await self.context.save_assistant_message(content=content)
 
         if get_config("feature.summary_enabled", True):
             asyncio.create_task(self._maybe_summarize())
@@ -107,34 +145,55 @@ class PoetAgent(BaseAgent):
         arguments: str,
         result: str,
     ) -> Optional[dict]:
+        """从工具返回结果中提取诗词数据。"""
         try:
             args = json.loads(arguments) if isinstance(arguments, str) else arguments
             result_data = json.loads(result) if isinstance(result, str) else result
 
+            # 检查工具返回是否成功
+            if isinstance(result_data, dict) and not result_data.get("success", True):
+                # 工具返回失败，但 LLM 会继续对话
+                return None
+
+            # 获取 data 字段（新的返回格式）
+            data = result_data.get("data") if isinstance(result_data, dict) else result_data
+
             if tool_name == "search_poem":
-                if isinstance(result_data, list) and result_data:
-                    poem = result_data[0]
+                if isinstance(data, list) and data:
+                    poem = data[0]
                     return {
                         "id": poem.get("id"),
                         "title": poem.get("title", ""),
                         "author": poem.get("author", ""),
                     }
             elif tool_name == "get_poem_detail":
-                return {
-                    "id": args.get("poem_id"),
-                    "title": result_data.get("title", ""),
-                    "author": result_data.get("author", ""),
-                }
+                if isinstance(data, dict):
+                    return {
+                        "id": data.get("id"),
+                        "title": data.get("title", ""),
+                        "author": data.get("author", ""),
+                    }
             elif tool_name == "get_random_poem":
-                return {
-                    "id": result_data.get("id"),
-                    "title": result_data.get("title", ""),
-                    "author": result_data.get("author", ""),
-                }
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
+                if isinstance(data, dict):
+                    return {
+                        "id": data.get("id"),
+                        "title": data.get("title", ""),
+                        "author": data.get("author", ""),
+                    }
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            logger.warning(f"Extract poem data failed: {e}")
 
         return None
+
+    def _is_tool_result_successful(self, result: str) -> bool:
+        """检查工具返回结果是否成功。"""
+        try:
+            result_data = json.loads(result) if isinstance(result, str) else result
+            if isinstance(result_data, dict):
+                return result_data.get("success", True)
+            return True
+        except (json.JSONDecodeError, TypeError):
+            return True  # 非 JSON 格式认为成功（兼容旧格式）
 
     async def _maybe_summarize(self) -> None:
         try:

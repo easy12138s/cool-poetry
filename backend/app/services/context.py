@@ -46,40 +46,34 @@ class ContextManager:
         self._initialized = True
 
     async def _load_history(self, limit: int = 10) -> None:
+        """加载历史会话，按时间升序排列（最旧的在最前）
+
+        确保消息按正确的时间顺序加载，这样 LLM 才能理解对话的上下文。
+        """
+        # 1. 查询最近的消息（按时间降序，最新的在前）
         result = await self.db.execute(
             select(Conversation)
             .where(Conversation.user_id == self.user_id)
             .order_by(Conversation.created_at.desc())
             .limit(limit * 2)
         )
-        all_convs = list(reversed(result.scalars().all()))
+        convs_desc = result.scalars().all()
 
-        valid_messages = []
-        for i, conv in enumerate(all_convs):
+        # 2. 转换为 Message 对象并过滤无效消息
+        messages_desc = []
+        for conv in convs_desc:
             message = self._conversation_to_message(conv)
-            if not message:
-                continue
+            if message:
+                messages_desc.append(message)
 
-            if message.role == MessageRole.ASSISTANT and message.tool_calls:
-                has_tool_response = False
-                for j in range(i + 1, len(all_convs)):
-                    next_msg = all_convs[j]
-                    if next_msg.role == "tool" and next_msg.tool_call_id:
-                        for tc in message.tool_calls:
-                            if tc.id == next_msg.tool_call_id:
-                                has_tool_response = True
-                                break
-                    if next_msg.role == "assistant":
-                        break
+        # 3. 反转列表，变成时间升序（最旧的在最前）
+        messages_asc = list(reversed(messages_desc))
 
-                if not has_tool_response:
-                    continue
+        # 4. 只保留最近 limit 条消息
+        recent_messages = messages_asc[-limit:] if len(messages_asc) > limit else messages_asc
 
-            valid_messages.append(message)
-            if len(valid_messages) >= limit:
-                break
-
-        for msg in valid_messages:
+        # 5. 按顺序添加到 short_term
+        for msg in recent_messages:
             self.short_term.append(msg)
 
     def _conversation_to_message(self, conv: Conversation) -> Optional[Message]:
