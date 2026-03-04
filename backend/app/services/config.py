@@ -26,6 +26,9 @@ class ConfigManager:
 
     @classmethod
     async def initialize(cls, db: AsyncSession) -> None:
+        if cls._instance is None:
+            cls._instance = cls()
+        
         if cls._instance._initialized:
             return
 
@@ -38,6 +41,9 @@ class ConfigManager:
 
     @classmethod
     async def shutdown(cls) -> None:
+        if cls._instance is None:
+            return
+            
         if cls._instance._refresh_task:
             cls._instance._refresh_task.cancel()
             try:
