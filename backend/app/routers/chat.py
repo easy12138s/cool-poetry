@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..agent.executor import PoetAgent
 from ..database import get_db
+from ..dependencies.auth import verify_user
+from ..models import User
 from ..services.memory import (
     get_or_create_device,
-    get_or_create_user,
     update_device_status,
     update_user_activity,
 )
@@ -37,9 +38,13 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
-    await get_or_create_device(db, request.device_id)
-    await get_or_create_user(db, request.user_id, request.device_id)
+    # 验证用户是否存在（中间件已验证，这里作为双重验证）
+    user = await verify_user(request.user_id, request.device_id, db)
 
+    # 更新设备状态（设备可以自动创建）
+    await get_or_create_device(db, request.device_id)
+
+    # 更新用户活动状态
     await update_device_status(db, request.device_id, "online")
     await update_user_activity(db, request.user_id)
 

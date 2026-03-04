@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine, get_db
+from .middleware.auth import UserAuthMiddleware
 from .routers import chat
 from .services.config import ConfigManager
 
@@ -33,12 +34,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 添加 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# 添加用户认证中间件（在 CORS 之后）
+app.add_middleware(
+    UserAuthMiddleware,
+    protected_paths=["/api/v1/chat"]  # 需要保护的路由
 )
 
 app.include_router(chat.router, prefix="/api/v1")
