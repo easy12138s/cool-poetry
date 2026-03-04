@@ -54,9 +54,20 @@ class ContextManager:
         )
         conversations = list(reversed(result.scalars().all()))
 
+        last_assistant_with_tool_calls = False
         for conv in conversations:
             message = self._conversation_to_message(conv)
-            if message:
+            if not message:
+                continue
+                
+            if message.role == MessageRole.ASSISTANT:
+                last_assistant_with_tool_calls = message.tool_calls is not None
+                self.short_term.append(message)
+            elif message.role == MessageRole.TOOL:
+                if last_assistant_with_tool_calls and message.tool_call_id:
+                    self.short_term.append(message)
+            else:
+                last_assistant_with_tool_calls = False
                 self.short_term.append(message)
 
     def _conversation_to_message(self, conv: Conversation) -> Optional[Message]:
