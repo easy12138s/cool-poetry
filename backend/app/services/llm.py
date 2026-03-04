@@ -34,14 +34,17 @@ async def chat_completion(
     messages: list[dict],
     tools: Optional[list[dict]] = None,
     tool_choice: str = "auto",
+    temperature: float = 0.7,
+    max_tokens: int = 500,
+    timeout: int = 30,
 ) -> dict:
     response = await client.chat.completions.create(
         model=settings.dashscope_model,
         messages=messages,
         tools=tools,
         tool_choice=tool_choice if tools else None,
-        temperature=0.7,
-        max_tokens=500,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
     choice = response.choices[0]
     result = {
