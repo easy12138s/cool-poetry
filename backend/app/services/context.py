@@ -45,29 +45,19 @@ class ContextManager:
         await self._load_profile()
         self._initialized = True
 
-    async def _load_history(self, limit: int = 20) -> None:
+    async def _load_history(self, limit: int = 10) -> None:
         result = await self.db.execute(
             select(Conversation)
             .where(Conversation.user_id == self.user_id)
+            .where(Conversation.tool_calls.is_(None))
             .order_by(Conversation.created_at.desc())
             .limit(limit)
         )
         conversations = list(reversed(result.scalars().all()))
 
-        last_assistant_with_tool_calls = False
         for conv in conversations:
             message = self._conversation_to_message(conv)
-            if not message:
-                continue
-                
-            if message.role == MessageRole.ASSISTANT:
-                last_assistant_with_tool_calls = message.tool_calls is not None
-                self.short_term.append(message)
-            elif message.role == MessageRole.TOOL:
-                if last_assistant_with_tool_calls and message.tool_call_id:
-                    self.short_term.append(message)
-            else:
-                last_assistant_with_tool_calls = False
+            if message:
                 self.short_term.append(message)
 
     def _conversation_to_message(self, conv: Conversation) -> Optional[Message]:
