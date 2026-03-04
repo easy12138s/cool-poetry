@@ -36,7 +36,7 @@ async def chat_completion(
     tool_choice: str = "auto",
     temperature: float = 0.7,
     max_tokens: int = 500,
-    timeout: int = 30,
+    timeout: int = 60,
 ) -> dict:
     response = await client.chat.completions.create(
         model=settings.dashscope_model,
@@ -45,6 +45,7 @@ async def chat_completion(
         tool_choice=tool_choice if tools else None,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
     )
     choice = response.choices[0]
     result = {
