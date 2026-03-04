@@ -103,7 +103,8 @@ class PromptBuilder:
 
         messages.extend(conversation_history)
 
-        messages.append({"role": "user", "content": user_message})
+        if user_message:
+            messages.append({"role": "user", "content": user_message})
 
         return messages
 
