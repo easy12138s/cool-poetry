@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.agent import Agent, AgentToolPermission, Tool
 from ..services.config import get_config
-from .base import ToolRegistry
+from .tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 

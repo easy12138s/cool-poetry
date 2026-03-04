@@ -2,10 +2,8 @@ import json
 import logging
 from typing import Optional
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.user_profile import UserProfile
 from .base import tool
 
 logger = logging.getLogger(__name__)
@@ -36,6 +34,7 @@ async def analyze_conversation(
     focus: str = "all",
     **kwargs,
 ) -> str:
+    """分析对话历史，提取关键信息"""
     result = {
         "key_poems": [],
         "key_poets": [],
@@ -84,80 +83,6 @@ async def analyze_conversation(
 
 
 @tool(
-    name="update_user_profile",
-    description="更新用户画像信息，如喜欢的诗人、诗词、兴趣等",
-    parameters={
-        "type": "object",
-        "properties": {
-            "favorite_poets": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "喜欢的诗人列表",
-            },
-            "favorite_poems": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "喜欢的诗词ID列表",
-            },
-            "interests": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "兴趣标签列表",
-            },
-        },
-        "required": [],
-    },
-)
-async def update_user_profile(
-    db: AsyncSession,
-    user_id: Optional[str] = None,
-    favorite_poets: Optional[list[str]] = None,
-    favorite_poems: Optional[list[int]] = None,
-    interests: Optional[list[str]] = None,
-    **kwargs,
-) -> str:
-    if not user_id:
-        return json.dumps({"success": False, "error": "缺少 user_id"}, ensure_ascii=False)
-
-    result = await db.execute(
-        select(UserProfile).where(UserProfile.user_id == user_id)
-    )
-    profile = result.scalar_one_or_none()
-
-    if not profile:
-        profile = UserProfile(user_id=user_id)
-        db.add(profile)
-
-    if favorite_poets:
-        current_poets = profile.favorite_poets or []
-        profile.favorite_poets = list(set(current_poets + favorite_poets))
-
-    if favorite_poems:
-        current_poems = profile.favorite_poems or []
-        profile.favorite_poems = list(set(current_poems + favorite_poems))
-
-    if interests:
-        current_progress = profile.learning_progress or {}
-        current_interests = current_progress.get("interests", [])
-        current_progress["interests"] = list(set(current_interests + interests))
-        profile.learning_progress = current_progress
-
-    await db.commit()
-
-    return json.dumps(
-        {
-            "success": True,
-            "message": "用户画像已更新",
-            "profile": {
-                "favorite_poets": profile.favorite_poets,
-                "favorite_poems": profile.favorite_poems,
-            },
-        },
-        ensure_ascii=False,
-    )
-
-
-@tool(
     name="extract_entities",
     description="从文本中提取关键实体，如诗词名、诗人名、关键词等",
     parameters={
@@ -176,6 +101,7 @@ async def extract_entities(
     text: str,
     **kwargs,
 ) -> str:
+    """从文本中提取关键实体"""
     entities = {
         "poems": [],
         "poets": [],

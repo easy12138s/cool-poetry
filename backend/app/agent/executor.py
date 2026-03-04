@@ -9,7 +9,7 @@ from ..models.context import ToolCall
 from ..services.config import get_config
 from ..services.context import ContextManager, generate_session_id
 from ..services.llm import chat_completion
-from .base import ToolRegistry
+from .tools import ToolRegistry
 from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)

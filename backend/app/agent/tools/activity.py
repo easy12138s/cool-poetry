@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.activity import ActivityState
+from ...models.activity import ActivityState
 from .base import tool
 
 logger = logging.getLogger(__name__)

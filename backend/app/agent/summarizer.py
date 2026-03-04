@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.summary import ConversationSummary
 from ..services.llm import chat_completion
-from .base import ToolRegistry
+from .tools import ToolRegistry
 from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
