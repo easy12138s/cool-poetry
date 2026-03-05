@@ -73,15 +73,6 @@ REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 - **玩诗词游戏**：如飞花令、对诗。
 - **闲聊回应**：如果孩子聊无关话题，简短回应后温和引回古诗。
 
-# 可用工具
-| 工具名 | 用途 | 使用场景 |
-|--------|------|----------|
-| search_poem | 搜索诗词 | 用户问"有什么关于月亮的诗" |
-| get_poem_detail | 获取诗词详情 | 需要诗词的译文、赏析等 |
-| get_random_poem | 随机获取诗词 | 用户说"随便来一首" |
-| get_author_info | 获取诗人信息 | 用户问"李白是谁" |
-| record_activity_state | 记录活动状态 | 开始诗词游戏时或者需要记录活动状态时调用 |
-
 # 动态上下文
 {dynamic_sections}
 
@@ -106,11 +97,6 @@ SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 - 保留关键诗词信息（标题、作者、名句）
 - 记录用户情感反应（喜欢、困惑、兴奋等）
 - 标注未完成的活动或话题
-
-# 可用工具
-- analyze_conversation: 分析对话内容
-- update_user_profile: 更新用户画像
-- extract_entities: 提取关键实体
 
 # 输出格式
 请以 JSON 格式输出：
@@ -149,10 +135,16 @@ TOOLS = [
      "app.agent.tools.analysis", "analyze_conversation"),
     ("update_user_profile", "更新用户画像", "更新用户偏好和画像信息",
      '{"type": "object", "properties": {"favorite_poets": {"type": "array"}, "favorite_poems": {"type": "array"}, "interests": {"type": "array"}}, "required": []}',
-     "app.agent.tools.analysis", "update_user_profile"),
+     "app.agent.tools.user", "update_user_profile"),
     ("extract_entities", "提取关键实体", "从对话中提取诗词、诗人等实体",
      '{"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}',
      "app.agent.tools.analysis", "extract_entities"),
+    ("get_user_profile", "获取用户画像", "获取用户的完整画像信息",
+     '{"type": "object", "properties": {}, "required": []}',
+     "app.agent.tools.user", "get_user_profile"),
+    ("record_learning_progress", "记录学习进度", "记录孩子的学习进度",
+     '{"type": "object", "properties": {"poem_id": {"type": "integer"}, "poem_title": {"type": "string"}, "mastery_level": {"type": "integer"}}, "required": ["poem_id", "poem_title"]}',
+     "app.agent.tools.user", "record_learning_progress"),
 ]
 
 
@@ -197,7 +189,7 @@ async def init_data():
             result = await conn.execute(text("SELECT id, tool_code FROM tools"))
             tool_map = {row[1]: row[0] for row in result.fetchall()}
             
-            poet_tools = ["search_poem", "get_poem_detail", "get_random_poem", "get_author_info", "record_activity_state"]
+            poet_tools = ["search_poem", "get_poem_detail", "get_random_poem", "get_author_info", "record_activity_state", "get_user_profile", "record_learning_progress"]
             summarizer_tools = ["analyze_conversation", "update_user_profile", "extract_entities"]
             
             for tool_code in poet_tools:
@@ -208,7 +200,7 @@ async def init_data():
                         ON DUPLICATE KEY UPDATE is_allowed = TRUE
                     """), {"agent_id": agent_map["poet"], "tool_id": tool_map[tool_code]})
             
-            for tool_code in ["analyze_conversation", "update_user_profile", "extract_entities"]:
+            for tool_code in summarizer_tools:
                 if tool_code in tool_map:
                     await conn.execute(text("""
                         INSERT INTO agent_tool_permissions (agent_id, tool_id, is_allowed)
