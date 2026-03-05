@@ -34,9 +34,11 @@ class PoetAgent(BaseAgent):
         await self.context.initialize()
 
     async def run(self, user_message: str) -> tuple[str, Optional[dict]]:
+        # 保存用户消息到数据库和 short_term
         await self.context.save_user_message(user_message)
 
-        messages = self.context.build_messages(user_message)
+        # 构建消息时不再重复添加 user_message（已在 short_term 中）
+        messages = self.context.build_messages(user_message="")
 
         tools = None
         if get_config("feature.tool_call_enabled", True):
@@ -136,8 +138,12 @@ class PoetAgent(BaseAgent):
 
         try:
             args = json.loads(arguments) if isinstance(arguments, str) else arguments
+            
+            # 确保 args 是字典
+            if not isinstance(args, dict):
+                args = {}
 
-            # 对于用户画像相关工具，自动传入 user_id
+            # 对于用户画像相关工具，自动传入 user_id（强制覆盖，确保使用当前登录用户）
             if tool_name in ["update_user_profile", "get_user_profile", "record_learning_progress"]:
                 args["user_id"] = self.user_id
 
