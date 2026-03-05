@@ -10,14 +10,21 @@ from .base import tool
 
 @tool(
     name="update_user_profile",
-    description="更新用户画像信息。当孩子提供昵称、年龄、喜欢的诗人等信息时调用。",
+    description="""更新用户画像信息。支持更新昵称、年龄、喜欢的诗人列表、偏好。
+
+使用建议：
+1. 先调用 get_user_profile 查询已有信息
+2. 根据已有信息决定是添加新数据还是覆盖旧数据
+3. 对于列表类型的字段（favorite_poets、add_preferences），会追加到已有列表
+4. 对于单值字段（nickname、age），会直接覆盖旧值""",
     parameters={
         "type": "object",
         "properties": {
-            "nickname": {"type": "string", "description": "孩子的昵称"},
-            "age": {"type": "integer", "description": "孩子的年龄"},
-            "favorite_poet": {"type": "string", "description": "孩子喜欢的诗人姓名，如'李白'"},
-            "preference": {"type": "string", "description": "孩子的偏好，如'喜欢写景的诗'、'喜欢短诗'"},
+            "nickname": {"type": "string", "description": "孩子的昵称，2-20个字符，覆盖旧值"},
+            "age": {"type": "integer", "description": "孩子的年龄，6-12岁，覆盖旧值", "minimum": 6, "maximum": 12},
+            "favorite_poets": {"type": "array", "items": {"type": "string"}, "description": "喜欢的诗人列表，如['李白', '杜甫']，会追加到已有列表"},
+            "add_preferences": {"type": "array", "items": {"type": "string"}, "description": "要添加的偏好列表，如['喜欢写景的诗', '喜欢短诗']"},
+            "remove_preferences": {"type": "array", "items": {"type": "string"}, "description": "要移除的偏好列表"},
         },
     },
 )
@@ -26,10 +33,18 @@ async def update_user_profile(
     user_id: str,
     nickname: Optional[str] = None,
     age: Optional[int] = None,
-    favorite_poet: Optional[str] = None,
-    preference: Optional[str] = None,
+    favorite_poets: Optional[list] = None,
+    add_preferences: Optional[list] = None,
+    remove_preferences: Optional[list] = None,
 ) -> str:
-    """更新用户画像"""
+    """更新用户画像 - 优化版本
+    
+    改进点：
+    1. 支持批量更新诗人列表
+    2. 支持添加和移除偏好
+    3. 添加年龄范围验证
+    4. 添加昵称长度验证
+    """
     result = await db.execute(
         select(UserProfile).where(UserProfile.user_id == user_id)
     )
@@ -41,30 +56,68 @@ async def update_user_profile(
 
     updated_fields = []
 
-    if nickname:
+    # 更新昵称（验证长度）
+    if nickname is not None:
+        if len(nickname) < 2 or len(nickname) > 20:
+            return json.dumps({
+                "success": False,
+                "message": "昵称长度需要在2-20个字符之间"
+            }, ensure_ascii=False)
         profile.nickname = nickname
         updated_fields.append(f"昵称：{nickname}")
 
-    if age:
+    # 更新年龄（验证范围）
+    if age is not None:
+        if age < 6 or age > 12:
+            return json.dumps({
+                "success": False,
+                "message": "年龄需要在6-12岁之间"
+            }, ensure_ascii=False)
         profile.age = age
         updated_fields.append(f"年龄：{age}岁")
 
-    if favorite_poet:
+    # 批量更新喜欢的诗人（追加模式，自动去重）
+    if favorite_poets is not None and isinstance(favorite_poets, list):
         current_poets = profile.favorite_poets or []
-        if favorite_poet not in current_poets:
-            current_poets.append(favorite_poet)
+        new_poets = [p for p in favorite_poets if p not in current_poets]
+        if new_poets:
+            current_poets.extend(new_poets)
             profile.favorite_poets = current_poets
-            updated_fields.append(f"喜欢的诗人：{favorite_poet}")
+            updated_fields.append(f"新增喜欢的诗人：{', '.join(new_poets)}")
 
-    if preference:
+    # 更新偏好（支持添加和移除）
+    if add_preferences is not None or remove_preferences is not None:
         prefs = profile.preferences or {}
         if "mentioned" not in prefs:
             prefs["mentioned"] = []
-        prefs["mentioned"].append(preference)
+        
+        # 添加新偏好
+        if add_preferences is not None and isinstance(add_preferences, list):
+            new_prefs = [p for p in add_preferences if p not in prefs["mentioned"]]
+            if new_prefs:
+                prefs["mentioned"].extend(new_prefs)
+                updated_fields.append(f"新增偏好：{', '.join(new_prefs)}")
+        
+        # 移除偏好
+        if remove_preferences is not None and isinstance(remove_preferences, list):
+            removed = []
+            for p in remove_preferences:
+                if p in prefs["mentioned"]:
+                    prefs["mentioned"].remove(p)
+                    removed.append(p)
+            if removed:
+                updated_fields.append(f"移除偏好：{', '.join(removed)}")
+        
         profile.preferences = prefs
-        updated_fields.append(f"偏好：{preference}")
 
     await db.commit()
+
+    if not updated_fields:
+        return json.dumps({
+            "success": True,
+            "message": "没有需要更新的信息",
+            "updated": []
+        }, ensure_ascii=False)
 
     return json.dumps({
         "success": True,

@@ -100,11 +100,10 @@ SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 - 标注未完成的活动或话题
 
 # 可用工具
-- analyze_conversation: 分析对话内容，提取关键实体
 - update_user_profile: 更新用户画像（昵称、年龄、喜欢的诗人等）
 
 # 输出格式（必须严格遵守）
-请先调用工具分析对话，然后以 JSON 格式输出：
+请直接分析对话内容，然后以 JSON 格式输出：
 {
   "summary": "用2-3句话概括对话内容，例如：孩子学习了《静夜思》，表现出对李白诗歌的浓厚兴趣，能熟练背诵全诗。",
   "key_poems": [{"title": "", "author": ""}],
@@ -143,9 +142,6 @@ TOOLS = [
     ("update_user_profile", "更新用户画像", "更新用户偏好和画像信息",
      '{"type": "object", "properties": {"favorite_poets": {"type": "array"}, "favorite_poems": {"type": "array"}, "interests": {"type": "array"}}, "required": []}',
      "app.agent.tools.user", "update_user_profile"),
-    ("extract_entities", "提取关键实体", "从对话中提取诗词、诗人等实体",
-     '{"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}',
-     "app.agent.tools.analysis", "extract_entities"),
     ("get_user_profile", "获取用户画像", "获取用户的完整画像信息",
      '{"type": "object", "properties": {}, "required": []}',
      "app.agent.tools.user", "get_user_profile"),
@@ -197,7 +193,7 @@ async def init_data():
             tool_map = {row[1]: row[0] for row in result.fetchall()}
             
             poet_tools = ["search_poem", "get_poem_detail", "get_random_poem", "get_author_info", "record_activity_state", "get_user_profile", "record_learning_progress"]
-            summarizer_tools = ["analyze_conversation", "update_user_profile", "extract_entities"]
+            summarizer_tools = ["update_user_profile"]
             
             for tool_code in poet_tools:
                 if tool_code in tool_map:

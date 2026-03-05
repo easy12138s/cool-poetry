@@ -10,9 +10,6 @@ from .user import update_user_profile, get_user_profile, record_learning_progres
 # 活动工具
 from .activity import record_activity_state
 
-# 分析工具
-from .analysis import analyze_conversation, extract_entities
-
 __all__ = [
     # 基础类
     "Tool",
@@ -29,7 +26,4 @@ __all__ = [
     "record_learning_progress",
     # 活动工具
     "record_activity_state",
-    # 分析工具
-    "analyze_conversation",
-    "extract_entities",
 ]

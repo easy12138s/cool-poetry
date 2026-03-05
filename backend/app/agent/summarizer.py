@@ -57,18 +57,11 @@ class SummarizerAgent(BaseAgent):
                     # 不是 JSON，直接使用内容
                     result["summary"] = content
 
-            # 处理工具调用结果（补充信息）
+            # 处理工具调用结果
             if tool_calls:
                 for tc in tool_calls:
                     tool_result = await self._execute_tool(tc["name"], tc["arguments"])
-                    if tc["name"] == "analyze_conversation":
-                        try:
-                            entities = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
-                            if isinstance(entities, dict) and not result["key_entities"]:
-                                result["key_entities"] = entities
-                        except Exception as e:
-                            logger.warning(f"Failed to parse analyze_conversation result: {e}")
-                    elif tc["name"] == "update_user_profile":
+                    if tc["name"] == "update_user_profile":
                         logger.info(f"User profile updated via summarizer: {tool_result}")
 
             return result

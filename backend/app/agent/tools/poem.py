@@ -2,12 +2,37 @@ import json
 import random
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...models import Author, Poem
 from .base import tool
+
+
+def _estimate_difficulty(content: str) -> int:
+    """基于诗词长度和生僻字估算难度"""
+    length = len(content)
+    
+    # 基础难度判断（基于长度）
+    if length <= 20:  # 五言绝句
+        base_difficulty = 1
+    elif length <= 28:  # 七言绝句
+        base_difficulty = 2
+    elif length <= 40:  # 五言律诗
+        base_difficulty = 3
+    elif length <= 56:  # 七言律诗
+        base_difficulty = 4
+    else:  # 长诗
+        base_difficulty = 5
+    
+    # 可以在这里添加生僻字检测逻辑
+    # rare_chars = ['曦', '曦', '曦', ...]  # 生僻字列表
+    # rare_count = sum(1 for char in content if char in rare_chars)
+    # if rare_count > 3:
+    #     base_difficulty = min(5, base_difficulty + 1)
+    
+    return base_difficulty
 
 
 @tool(
@@ -20,13 +45,13 @@ from .base import tool
 - 元曲：如马致远、关汉卿的散曲
 - 其他古典文学作品
 
-支持按关键词、作者、类别、场景标签搜索。""",
+支持按关键词、作者、类别搜索。""",
     parameters={
         "type": "object",
         "properties": {
             "keyword": {
                 "type": "string",
-                "description": "搜索关键词，可以是作品标题或内容中的词，如'静夜思'、'明月'",
+                "description": "搜索关键词，可以是作品标题，如'静夜思'、'明月'",
             },
             "author": {
                 "type": "string",
@@ -36,14 +61,6 @@ from .base import tool
                 "type": "string",
                 "enum": ["tang_poem", "song_ci", "song_poem", "yuanqu", "imperial_tang"],
                 "description": "作品类别：tang_poem(唐诗)、song_ci(宋词)、song_poem(宋诗)、yuanqu(元曲)、imperial_tang(宫廷唐诗)",
-            },
-            "scene_tag": {
-                "type": "string",
-                "description": "场景标签，如春天、月亮、思乡、送别、山水、边塞",
-            },
-            "difficulty": {
-                "type": "integer",
-                "description": "难度等级 1-5，1最简单",
             },
             "limit": {
                 "type": "integer",
@@ -57,59 +74,44 @@ async def search_poem(
     keyword: Optional[str] = None,
     author: Optional[str] = None,
     category: Optional[str] = None,
-    scene_tag: Optional[str] = None,
-    difficulty: Optional[int] = None,
     limit: int = 5,
 ) -> str:
-    """搜索古诗词作品，包括唐诗、宋词、元曲等。"""
+    """搜索古诗词作品，包括唐诗、宋词、元曲等。
+    
+    注意：由于数据库中 is_for_children、scene_tags、difficulty 字段为空或默认值，
+    已移除这些无效过滤条件。
+    """
 
-    async def _do_search(for_children_only: bool = True):
-        query = (
-            select(Poem)
-            .options(selectinload(Poem.author), selectinload(Poem.paragraphs))
-        )
+    query = (
+        select(Poem)
+        .options(selectinload(Poem.author), selectinload(Poem.paragraphs))
+    )
 
-        if for_children_only:
-            query = query.where(Poem.is_for_children == True)
+    # 按类别过滤（有值）
+    if category:
+        query = query.where(Poem.category == category)
 
-        # 按类别过滤
-        if category:
-            query = query.where(Poem.category == category)
+    # 只在 title 中搜索（notes 字段可能为空）
+    if keyword:
+        query = query.where(Poem.title.contains(keyword))
 
-        if keyword:
-            query = query.where(
-                (Poem.title.contains(keyword)) | (Poem.notes.contains(keyword))
-            )
+    # 通过 author 表关联查询
+    if author:
+        author_query = select(Author.id).where(Author.name.contains(author))
+        author_result = await db.execute(author_query)
+        author_ids = [a[0] for a in author_result.fetchall()]
+        if author_ids:
+            query = query.where(Poem.author_id.in_(author_ids))
 
-        if author:
-            author_query = select(Author.id).where(Author.name.contains(author))
-            author_result = await db.execute(author_query)
-            author_ids = [a[0] for a in author_result.fetchall()]
-            if author_ids:
-                query = query.where(Poem.author_id.in_(author_ids))
-
-        if scene_tag:
-            query = query.where(Poem.scene_tags.contains(f'"{scene_tag}"'))
-
-        if difficulty:
-            query = query.where(Poem.difficulty <= difficulty)
-
-        query = query.limit(limit)
-        result = await db.execute(query)
-        return result.scalars().all()
-
-    # 先尝试搜索适合儿童的诗词
-    poems = await _do_search(for_children_only=True)
-
-    # 如果没有找到，尝试搜索所有诗词
-    if not poems:
-        poems = await _do_search(for_children_only=False)
+    query = query.limit(limit)
+    result = await db.execute(query)
+    poems = result.scalars().all()
 
     if not poems:
         return json.dumps({
             "success": False,
             "data": None,
-            "message": f"没有找到包含'{keyword or author or scene_tag}'的诗词。",
+            "message": f"没有找到包含'{keyword or author}'的诗词。",
             "suggestions": ["尝试关键词：月亮、春天、花、山、水", "尝试诗人：李白、杜甫、白居易、王维"]
         }, ensure_ascii=False)
 
@@ -117,13 +119,15 @@ async def search_poem(
     for poem in poems:
         author_name = poem.author.name if poem.author else "未知"
         content = "".join([p.content for p in poem.paragraphs])
+        # 动态计算难度（数据库中可能为默认值）
+        difficulty = poem.difficulty if poem.difficulty and poem.difficulty != 3 else _estimate_difficulty(content)
+        
         output.append({
             "id": poem.id,
             "title": poem.title,
             "author": author_name,
             "content": content,
-            "difficulty": poem.difficulty,
-            "is_for_children": poem.is_for_children,
+            "difficulty": difficulty,
             "category": poem.category,
         })
 
@@ -155,7 +159,11 @@ async def search_poem(
     },
 )
 async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
-    """获取古诗词作品的详细信息。"""
+    """获取古诗词作品的详细信息。
+    
+    注意：translation、appreciation 字段可能为空，会返回友好提示。
+    difficulty 字段会动态计算。
+    """
     query = (
         select(Poem)
         .options(selectinload(Poem.author), selectinload(Poem.paragraphs))
@@ -173,6 +181,9 @@ async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
 
     author_name = poem.author.name if poem.author else "未知"
     content = "\n".join([p.content for p in poem.paragraphs])
+    
+    # 动态计算难度
+    difficulty = poem.difficulty if poem.difficulty and poem.difficulty != 3 else _estimate_difficulty(content)
 
     detail = {
         "id": poem.id,
@@ -180,9 +191,10 @@ async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
         "author": author_name,
         "dynasty": poem.author.dynasty if poem.author and poem.author.dynasty else "朝代不详",
         "content": content,
-        "translation": poem.translation,
-        "appreciation": poem.appreciation,
-        "difficulty": poem.difficulty,
+        # 处理可能为空的字段
+        "translation": poem.translation or "暂无译文，小诗仙可以为你讲解这首诗的意思哦~",
+        "appreciation": poem.appreciation or "暂无赏析，你想听听这首诗的妙处吗？",
+        "difficulty": difficulty,
         "category": poem.category,
     }
 
@@ -202,7 +214,7 @@ async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
 - 宋词：苏轼、李清照等宋代词人的作品
 - 元曲：马致远、关汉卿等元代曲作家的作品
 
-可以指定难度等级获取适合的作品。""",
+可以指定类别获取特定类型的作品。""",
     parameters={
         "type": "object",
         "properties": {
@@ -211,45 +223,28 @@ async def get_poem_detail(db: AsyncSession, poem_id: int) -> str:
                 "enum": ["tang_poem", "song_ci", "song_poem", "yuanqu", "imperial_tang"],
                 "description": "作品类别，不指定则随机选择",
             },
-            "difficulty": {
-                "type": "integer",
-                "description": "难度等级 1-5，默认随机",
-            },
         },
     },
 )
 async def get_random_poem(
     db: AsyncSession,
     category: Optional[str] = None,
-    difficulty: Optional[int] = None,
 ) -> str:
-    """随机获取一首古诗词作品。"""
+    """随机获取一首古诗词作品。
+    
+    注意：已移除 difficulty 过滤（数据库中该字段为默认值）。
+    """
+    query = (
+        select(Poem)
+        .options(selectinload(Poem.author), selectinload(Poem.paragraphs))
+    )
 
-    async def _get_poems(for_children_only: bool = True):
-        query = (
-            select(Poem)
-            .options(selectinload(Poem.author), selectinload(Poem.paragraphs))
-        )
+    # 只保留 category 过滤
+    if category:
+        query = query.where(Poem.category == category)
 
-        if for_children_only:
-            query = query.where(Poem.is_for_children == True)
-
-        # 按类别过滤
-        if category:
-            query = query.where(Poem.category == category)
-
-        if difficulty:
-            query = query.where(Poem.difficulty <= difficulty)
-
-        result = await db.execute(query)
-        return result.scalars().all()
-
-    # 先尝试获取适合儿童的诗词
-    poems = await _get_poems(for_children_only=True)
-
-    # 如果没有找到，尝试获取所有诗词
-    if not poems:
-        poems = await _get_poems(for_children_only=False)
+    result = await db.execute(query)
+    poems = result.scalars().all()
 
     if not poems:
         return json.dumps({
@@ -264,13 +259,16 @@ async def get_random_poem(
 
     author_name = poem.author.name if poem.author else "未知"
     content = "".join([p.content for p in poem.paragraphs])
+    
+    # 动态计算难度
+    difficulty = poem.difficulty if poem.difficulty and poem.difficulty != 3 else _estimate_difficulty(content)
 
     result = {
         "id": poem.id,
         "title": poem.title,
         "author": author_name,
         "content": content,
-        "difficulty": poem.difficulty,
+        "difficulty": difficulty,
         "dynasty": poem.author.dynasty if poem.author and poem.author.dynasty else "朝代不详",
         "category": poem.category,
     }
@@ -284,7 +282,7 @@ async def get_random_poem(
 
 @tool(
     name="get_author_info",
-    description="""获取文学家的详细信息，包括生平简介和代表作品。
+    description="""获取文学家的详细信息，包括生平简介、代表作品和创作统计。
 
 涵盖：
 - 唐代诗人：李白、杜甫、白居易等
@@ -303,7 +301,7 @@ async def get_random_poem(
     },
 )
 async def get_author_info(db: AsyncSession, name: str) -> str:
-    """获取文学家的详细信息。"""
+    """获取文学家的详细信息，包括统计信息。"""
     query = select(Author).where(Author.name.contains(name))
     result = await db.execute(query)
     author = result.scalar_one_or_none()
@@ -316,20 +314,40 @@ async def get_author_info(db: AsyncSession, name: str) -> str:
             "suggestions": ["尝试：李白、杜甫、白居易、王维、苏轼"]
         }, ensure_ascii=False)
 
+    # 获取诗人的所有诗词
     poem_query = (
         select(Poem)
+        .options(selectinload(Poem.paragraphs))
         .where(Poem.author_id == author.id)
-        .limit(5)
     )
     poem_result = await db.execute(poem_query)
     poems = poem_result.scalars().all()
+
+    # 统计诗词类别分布
+    category_stats = {}
+    for poem in poems:
+        cat = poem.category or "未知"
+        category_stats[cat] = category_stats.get(cat, 0) + 1
+
+    # 构建代表作品列表（包含内容预览）
+    representative_works = []
+    for poem in poems[:5]:
+        content = "".join([p.content for p in poem.paragraphs])
+        representative_works.append({
+            "id": poem.id,
+            "title": poem.title,
+            "preview": content[:30] + "..." if len(content) > 30 else content,
+            "category": poem.category,
+        })
 
     result = {
         "id": author.id,
         "name": author.name,
         "dynasty": author.dynasty or "不详",
-        "description": author.description or "暂无简介",
-        "representative_works": [poem.title for poem in poems]
+        "description": author.description or f"{author.name}是{author.dynasty or '古代'}著名诗人，留下了许多脍炙人口的诗篇。",
+        "poem_count": len(poems),
+        "category_distribution": category_stats,
+        "representative_works": representative_works,
     }
 
     return json.dumps({
