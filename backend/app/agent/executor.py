@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Any, Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.context import ToolCall
@@ -37,8 +38,12 @@ class PoetAgent(BaseAgent):
         # 保存用户消息到数据库和 short_term
         await self.context.save_user_message(user_message)
 
+        # 检查是否需要强制触发会话压缩（异步，不等待）
+        asyncio.create_task(self._check_force_summary())
+
         # 构建消息时不再重复添加 user_message（已在 short_term 中）
-        messages = self.context.build_messages(user_message="")
+        # 传入从数据库加载的 system_prompt
+        messages = self.context.build_messages(user_message="", system_prompt=self.get_system_prompt())
 
         tools = None
         if get_config("feature.tool_call_enabled", True):
@@ -106,6 +111,14 @@ class PoetAgent(BaseAgent):
                             extracted.get("title", ""),
                             extracted.get("author", ""),
                         )
+                
+                # 记录用户画像更新
+                if tc["name"] == "update_user_profile":
+                    logger.info(f"User profile updated via poet agent: user={self.user_id}, result={tool_result}")
+                
+                # 记录学习进度
+                if tc["name"] == "record_learning_progress":
+                    logger.info(f"Learning progress recorded via poet agent: user={self.user_id}, result={tool_result}")
 
             # 再次调用 LLM
             messages = self.context.build_messages("")
@@ -220,19 +233,83 @@ class PoetAgent(BaseAgent):
             async with async_session() as db:
                 threshold = get_config("summary.trigger_threshold", 20)
                 count = await self._count_messages_since_last_summary(db)
+                
+                logger.debug(f"_maybe_summarize: user={self.user_id}, messages_since_last_summary={count}, threshold={threshold}")
 
                 if count >= threshold:
+                    logger.info(f"Triggering summary for user {self.user_id}: {count} messages >= threshold {threshold}")
+                    
                     summarizer = SummarizerAgent(db, self.user_id)
                     await summarizer.initialize()
+                    
                     messages = self._get_messages_for_summary()
+                    logger.debug(f"Got {len(messages)} messages for summary")
+                    
                     if messages:
-                        await summarizer.summarize_and_save(messages)
+                        result = await summarizer.summarize_and_save(messages)
+                        if result:
+                            logger.info(f"Summary created successfully: id={result.id}, messages={result.message_count}")
+                        else:
+                            logger.warning(f"Summary creation returned None for user {self.user_id}")
+                    else:
+                        logger.warning(f"No messages to summarize for user {self.user_id}")
+                else:
+                    logger.debug(f"Not triggering summary: {count} < {threshold}")
         except Exception as e:
-            logger.warning(f"会话压缩失败: {e}")
+            logger.exception(f"会话压缩失败: {e}")
+
+    async def _check_force_summary(self) -> None:
+        """检查是否需要强制触发会话压缩（兜底逻辑）
+        
+        当消息数超过阈值2倍且没有摘要时，强制触发压缩
+        """
+        try:
+            from ..database import async_session
+
+            async with async_session() as db:
+                threshold = get_config("summary.trigger_threshold", 20)
+                
+                # 获取总消息数
+                total_count = await self._get_total_message_count(db)
+                
+                # 超过阈值2倍，检查是否有摘要
+                if total_count >= threshold * 2:
+                    has_summary = await self._has_any_summary(db)
+                    
+                    if not has_summary:
+                        logger.warning(f"Force summary triggered: user={self.user_id}, total_messages={total_count}, threshold={threshold}")
+                        # 强制触发压缩
+                        await self._maybe_summarize()
+                    else:
+                        logger.debug(f"User {self.user_id} has summary, no force needed")
+                else:
+                    logger.debug(f"Not force summary: user={self.user_id}, count={total_count}, threshold*2={threshold*2}")
+        except Exception as e:
+            logger.exception(f"Force summary check failed: {e}")
+
+    async def _get_total_message_count(self, db) -> int:
+        """获取用户的总消息数"""
+        from ..models.conversation import Conversation
+
+        result = await db.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.user_id == self.user_id)
+        )
+        return result.scalar() or 0
+
+    async def _has_any_summary(self, db) -> bool:
+        """检查用户是否有任何摘要记录"""
+        from ..models.summary import ConversationSummary
+
+        result = await db.execute(
+            select(ConversationSummary)
+            .where(ConversationSummary.user_id == self.user_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def _count_messages_since_last_summary(self, db) -> int:
-        from sqlalchemy import func, select
-
         from ..models.summary import ConversationSummary
 
         result = await db.execute(

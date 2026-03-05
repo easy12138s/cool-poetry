@@ -44,13 +44,23 @@ class ConfigManager:
         if cls._instance is None:
             return
             
-        if cls._instance._refresh_task:
+        # 取消刷新任务
+        if cls._instance._refresh_task and not cls._instance._refresh_task.done():
             cls._instance._refresh_task.cancel()
             try:
-                await cls._instance._refresh_task
-            except asyncio.CancelledError:
+                # 设置超时，避免无限等待
+                await asyncio.wait_for(cls._instance._refresh_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-        cls._instance._initialized = False
+            except Exception as e:
+                logger.warning(f"Refresh task cancel warning: {e}")
+        
+        # 清理缓存
+        if cls._instance:
+            cls._instance._cache.clear()
+            cls._instance._initialized = False
+            cls._instance._db_session = None
+        
         logger.info("ConfigManager shutdown")
 
     async def _load_cacheable_configs(self) -> None:
@@ -194,11 +204,17 @@ class ConfigManager:
         while True:
             try:
                 await asyncio.sleep(60)
+                # 检查是否已关闭
+                if not self._initialized:
+                    break
                 await self._refresh_expired()
             except asyncio.CancelledError:
+                # 正常取消，退出循环
                 break
             except Exception as e:
-                logger.warning(f"Config refresh failed: {e}")
+                # 其他异常，记录但继续运行
+                if self._initialized:
+                    logger.warning(f"Config refresh failed: {e}")
 
     async def _refresh_expired(self) -> None:
         now = datetime.now()

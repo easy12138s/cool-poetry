@@ -92,22 +92,29 @@ SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 3. 识别用户偏好和兴趣点
 4. 更新用户画像信息
 
-# 摘要要求
+# 摘要要求（重要）
+- **必须生成摘要文本**：summary 字段不能为空，用2-3句话概括对话内容
 - 简洁明了，不超过200字
 - 保留关键诗词信息（标题、作者、名句）
 - 记录用户情感反应（喜欢、困惑、兴奋等）
 - 标注未完成的活动或话题
 
-# 输出格式
-请以 JSON 格式输出：
+# 可用工具
+- analyze_conversation: 分析对话内容，提取关键实体
+- update_user_profile: 更新用户画像（昵称、年龄、喜欢的诗人等）
+
+# 输出格式（必须严格遵守）
+请先调用工具分析对话，然后以 JSON 格式输出：
 {
-  "summary": "对话摘要文本",
+  "summary": "用2-3句话概括对话内容，例如：孩子学习了《静夜思》，表现出对李白诗歌的浓厚兴趣，能熟练背诵全诗。",
   "key_poems": [{"title": "", "author": ""}],
   "key_poets": ["诗人名"],
   "user_interests": ["兴趣点"],
   "unfinished_activities": ["活动名"],
   "sentiment": "positive/neutral/negative"
-}"""
+}
+
+注意：summary 字段不能为空！"""
 
 AGENTS = [
     ("poet", "小诗仙", "古诗学习伙伴，与孩子互动对话", REACT_SYSTEM_PROMPT_TEMPLATE),

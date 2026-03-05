@@ -14,10 +14,10 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 
 # 了解孩子（重要）
 - 如果是第一次对话，主动询问孩子的名字、年龄、喜欢什么。
-- 当孩子提供这些信息时，使用 update_user_profile 工具记录下来。
+- 当需要了解孩子的完整信息时，使用 get_user_profile 工具查询已有信息。
 - 根据孩子的年龄调整难度：6-8岁推荐简单短诗，9-12岁可以稍微复杂。
-- 如果孩子提到喜欢的诗人或主题，记录下来，以后优先推荐相关诗词。
-- 当需要了解孩子的学习情况（如已学多少首诗、掌握程度）时，使用 get_user_profile 工具查询。
+- 如果孩子提到喜欢的诗人或主题，使用 update_user_profile 工具更新记录。
+- 当孩子学会一首诗后，使用 record_learning_progress 工具记录学习进度。
 
 # 个性化推荐
 - 根据孩子的年龄推荐合适难度的诗。
@@ -159,10 +159,18 @@ class PromptBuilder:
         user_profile: Optional[dict] = None,
         scene_context: Optional[SceneContext] = None,
         task_state: Optional[TaskState] = None,
+        system_prompt: Optional[str] = None,
     ) -> list[dict]:
         messages = []
 
-        system_content = self.build_system_prompt(user_profile, scene_context, task_state)
+        # 优先使用传入的 system_prompt，否则使用模板构建
+        if system_prompt:
+            # 将动态内容附加到传入的 system_prompt
+            dynamic_sections = self._build_dynamic_sections(user_profile, scene_context, task_state)
+            system_content = system_prompt + dynamic_sections
+        else:
+            system_content = self.build_system_prompt(user_profile, scene_context, task_state)
+        
         messages.append({"role": "system", "content": system_content})
 
         messages.extend(conversation_history)
@@ -171,6 +179,33 @@ class PromptBuilder:
             messages.append({"role": "user", "content": user_message})
 
         return messages
+
+    def _build_dynamic_sections(
+        self,
+        user_profile: Optional[dict] = None,
+        scene_context: Optional[SceneContext] = None,
+        task_state: Optional[TaskState] = None,
+    ) -> str:
+        """构建动态内容部分"""
+        dynamic_parts = []
+
+        if user_profile:
+            profile_content = self._format_profile(user_profile)
+            if profile_content:
+                dynamic_parts.append(USER_PROFILE_TEMPLATE.format(profile_content=profile_content))
+
+        if scene_context and not scene_context.is_empty():
+            scene_content = scene_context.to_prompt_text()
+            if scene_content:
+                dynamic_parts.append(SCENE_CONTEXT_TEMPLATE.format(scene_content=scene_content))
+
+        if task_state and task_state.last_poem_title:
+            dynamic_parts.append(RECENT_POEM_TEMPLATE.format(
+                poem_title=task_state.last_poem_title,
+                poem_author=task_state.last_poem_author or "佚名"
+            ))
+
+        return "".join(dynamic_parts)
 
 
 prompt_builder = PromptBuilder()

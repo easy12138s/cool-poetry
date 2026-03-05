@@ -221,7 +221,7 @@ class ContextManager:
     def get_history(self) -> list[dict]:
         return [msg.to_openai_format() for msg in self.short_term]
 
-    def build_messages(self, user_message: str) -> list[dict]:
+    def build_messages(self, user_message: str, system_prompt: Optional[str] = None) -> list[dict]:
         history = self.get_history()
         return prompt_builder.build_messages(
             user_message=user_message,
@@ -229,6 +229,7 @@ class ContextManager:
             scene_context=self.scene_context,
             user_profile=self._profile_cache,
             task_state=self.state,
+            system_prompt=system_prompt,
         )
 
     def get_context_summary(self) -> str:

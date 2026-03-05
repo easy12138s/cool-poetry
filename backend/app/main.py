@@ -22,8 +22,20 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    await ConfigManager.shutdown()
-    await engine.dispose()
+    # 优雅关闭：先停止 ConfigManager，再关闭数据库连接
+    try:
+        await ConfigManager.shutdown()
+        logger.info("ConfigManager shutdown")
+    except Exception as e:
+        logger.warning(f"ConfigManager shutdown warning: {e}")
+    
+    # 确保所有连接都归还到连接池后再 dispose
+    try:
+        await engine.dispose()
+        logger.info("Database engine disposed")
+    except Exception as e:
+        logger.warning(f"Engine dispose warning: {e}")
+    
     logger.info("Application shutdown")
 
 

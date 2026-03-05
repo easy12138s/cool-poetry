@@ -83,16 +83,39 @@ async def chat_completion(
 async def chat_completion_stream(
     messages: list[dict],
     tools: Optional[list[dict]] = None,
+    temperature: float = 0.7,
+    max_tokens: int = 500,
+    timeout: int = 60,
 ):
-    stream = await client.chat.completions.create(
-        model=settings.dashscope_model,
-        messages=messages,
-        tools=tools,
-        temperature=0.7,
-        max_tokens=500,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
+    """流式调用大模型进行对话。
+    
+    Args:
+        messages: 消息列表
+        tools: 工具列表（可选）
+        temperature: 温度参数
+        max_tokens: 最大token数
+        timeout: 超时时间
+        
+    Yields:
+        chunk: 流式响应块
+    """
+    # 构建请求参数
+    request_params = {
+        "model": settings.dashscope_model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    
+    # 只在有工具时添加工具相关参数
+    if tools:
+        request_params["tools"] = tools
+        request_params["tool_choice"] = "auto"
+    
+    stream = await client.chat.completions.create(**request_params)
     
     async for chunk in stream:
         yield chunk
