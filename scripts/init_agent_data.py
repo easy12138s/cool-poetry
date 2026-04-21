@@ -91,7 +91,9 @@ SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 1. 生成对话摘要，保留重要信息
 2. 提取关键实体（讨论过的诗词、诗人）
 3. 识别用户偏好和兴趣点
-4. 更新用户画像信息
+4. 分析用户画像变化（新增的年龄信息、偏好变化、学习进展）
+5. 识别用户情感状态
+6. 更新用户画像信息
 
 # 摘要要求（重要）
 - **必须生成摘要文本**：summary 字段不能为空，用2-3句话概括对话内容
@@ -100,21 +102,43 @@ SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 - 记录用户情感反应（喜欢、困惑、兴奋等）
 - 标注未完成的活动或话题
 
+# 画像进化分析（重要）
+从对话中识别以下画像变化，并在 profile_updates 字段中输出：
+- **nickname**: 如果用户透露了名字/昵称
+- **age**: 如果用户透露了年龄或可以推断年龄段
+- **favorite_poets**: 用户提到喜欢某位诗人
+- **add_preferences**: 用户表现出新的偏好（如"喜欢写景的诗"、"喜欢短诗"、"喜欢互动游戏"）
+- **mastery_updates**: 学习进度变化，格式为 [{"poem_id": id, "poem_title": "标题", "mastery_level": 1-5}]
+
+# 情感分析
+- positive: 用户表现出喜欢、兴奋、好奇
+- neutral: 用户情绪平稳
+- negative: 用户表现出困惑、无聊、沮丧
+- 在 sentiment_detail 中简要说明情感判断依据
+
 # 可用工具
-- update_user_profile: 更新用户画像（昵称、年龄、喜欢的诗人等）
+- update_user_profile: 更新用户画像（昵称、年龄、喜欢的诗人、偏好等）
 
 # 输出格式（必须严格遵守）
 请直接分析对话内容，然后以 JSON 格式输出：
 {
-  "summary": "用2-3句话概括对话内容，例如：孩子学习了《静夜思》，表现出对李白诗歌的浓厚兴趣，能熟练背诵全诗。",
+  "summary": "用2-3句话概括对话内容",
   "key_poems": [{"title": "", "author": ""}],
   "key_poets": ["诗人名"],
   "user_interests": ["兴趣点"],
   "unfinished_activities": ["活动名"],
-  "sentiment": "positive/neutral/negative"
+  "sentiment": "positive/neutral/negative",
+  "sentiment_detail": "情感判断依据",
+  "profile_updates": {
+    "nickname": null,
+    "age": null,
+    "favorite_poets": [],
+    "add_preferences": [],
+    "mastery_updates": []
+  }
 }
 
-注意：summary 字段不能为空！"""
+注意：summary 字段不能为空！profile_updates 中没有变化的字段填 null 或空数组。"""
 
 AGENTS = [
     ("poet", "小诗仙", "古诗学习伙伴，与孩子互动对话", REACT_SYSTEM_PROMPT_TEMPLATE),
