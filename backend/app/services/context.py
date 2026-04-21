@@ -221,8 +221,13 @@ class ContextManager:
     def get_history(self) -> list[dict]:
         return [msg.to_openai_format() for msg in self.short_term]
 
-    def build_messages(self, user_message: str, system_prompt: Optional[str] = None) -> list[dict]:
+    def build_messages(self, user_message: str, system_prompt: Optional[str] = None, skill_extension: str = "", **dynamic_context) -> list[dict]:
         history = self.get_history()
+        if skill_extension and dynamic_context:
+            try:
+                skill_extension = skill_extension.format(**dynamic_context)
+            except KeyError:
+                pass
         return prompt_builder.build_messages(
             user_message=user_message,
             conversation_history=history,
@@ -230,6 +235,7 @@ class ContextManager:
             user_profile=self._profile_cache,
             task_state=self.state,
             system_prompt=system_prompt,
+            skill_extension=skill_extension,
         )
 
     def get_context_summary(self) -> str:

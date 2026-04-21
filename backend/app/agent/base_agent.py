@@ -49,10 +49,13 @@ class BaseAgent(ABC):
         )
         return [row[0] for row in result.all()]
 
-    def get_tools(self) -> list[dict]:
+    def get_tools(self, skill_whitelist: Optional[list[str]] = None) -> list[dict]:
         if not self._allowed_tools:
             return []
-        return ToolRegistry.get_tools_by_codes(self._allowed_tools)
+        allowed = self._allowed_tools
+        if skill_whitelist is not None:
+            allowed = [t for t in allowed if t in skill_whitelist]
+        return ToolRegistry.get_tools_by_codes(allowed)
 
     def get_model_config(self) -> dict:
         prefix = f"model.{self.agent_code}" if self.agent_code != "poet" else "model"

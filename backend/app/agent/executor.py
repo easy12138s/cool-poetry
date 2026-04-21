@@ -10,6 +10,7 @@ from ..models.context import ToolCall
 from ..services.config import get_config
 from ..services.context import ContextManager, generate_session_id
 from ..services.llm import chat_completion
+from .skills import SkillRegistry, SkillDetector
 from .tools import ToolRegistry
 from .base_agent import BaseAgent
 
@@ -34,20 +35,62 @@ class PoetAgent(BaseAgent):
         )
         await self.context.initialize()
 
+    def _get_state_dict(self) -> dict:
+        if not self.context:
+            return {"skill_name": "chat"}
+        state = self.context.state
+        return {
+            "skill_name": state.skill_name,
+            "game_state": state.game_state,
+            "daily_plan": state.daily_plan,
+            "last_poem_title": state.last_poem_title,
+            "last_poem_author": state.last_poem_author,
+        }
+
+    def _apply_state_dict(self, state_dict: dict) -> None:
+        if not self.context:
+            return
+        state = self.context.state
+        if "skill_name" in state_dict:
+            state.skill_name = state_dict["skill_name"]
+        if "game_state" in state_dict:
+            state.game_state = state_dict["game_state"]
+        if "daily_plan" in state_dict:
+            state.daily_plan = state_dict["daily_plan"]
+
     async def run(self, user_message: str) -> tuple[str, Optional[dict]]:
-        # 保存用户消息到数据库和 short_term
         await self.context.save_user_message(user_message)
 
-        # 检查是否需要强制触发会话压缩（异步，不等待）
         asyncio.create_task(self._check_force_summary())
 
-        # 构建消息时不再重复添加 user_message（已在 short_term 中）
-        # 传入从数据库加载的 system_prompt
-        messages = self.context.build_messages(user_message="", system_prompt=self.get_system_prompt())
+        state_dict = self._get_state_dict()
+        new_skill_name = SkillDetector.detect(user_message, state_dict)
+        current_skill_name = state_dict.get("skill_name", "chat")
 
+        if new_skill_name != current_skill_name:
+            old_skill = SkillRegistry.get(current_skill_name)
+            new_skill = SkillRegistry.get(new_skill_name)
+            if old_skill:
+                state_dict = old_skill.on_deactivate(state_dict)
+            if new_skill:
+                state_dict = new_skill.on_activate(state_dict)
+            self._apply_state_dict(state_dict)
+
+        skill = SkillRegistry.get(new_skill_name)
+        skill_extension = skill.get_prompt_extension() if skill else ""
+        dynamic_context = skill.build_dynamic_context(state_dict) if skill else {}
+
+        messages = self.context.build_messages(
+            user_message="",
+            system_prompt=self.get_system_prompt(),
+            skill_extension=skill_extension,
+            **dynamic_context,
+        )
+
+        tool_whitelist = skill.get_tool_whitelist() if skill else None
         tools = None
         if get_config("feature.tool_call_enabled", True):
-            tools = self.get_tools()
+            tools = self.get_tools(skill_whitelist=tool_whitelist)
 
         model_config = self.get_model_config()
         response = await chat_completion(messages, tools=tools if tools else None, **model_config)
@@ -56,14 +99,11 @@ class PoetAgent(BaseAgent):
         tool_calls = response["tool_calls"]
         poem_data = None
         call_count = 0
-
-        # 收集所有 tool_calls 用于最后统一保存
         all_tool_calls = []
 
         while tool_calls and call_count < self._max_tool_calls:
             call_count += 1
 
-            # 添加 assistant 的 tool_calls 到消息历史（用于 LLM 上下文）
             assistant_message = {
                 "role": "assistant",
                 "content": content,
@@ -81,14 +121,12 @@ class PoetAgent(BaseAgent):
             }
             messages.append(assistant_message)
 
-            # 收集 tool_calls 用于最后保存
             for tc in tool_calls:
                 tool_call_obj = ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
                 all_tool_calls.append(tool_call_obj)
 
                 tool_result = await self._execute_tool(tc["name"], tc["arguments"])
 
-                # 添加 tool 消息到 LLM 上下文（符合 OpenAI 格式）
                 tool_message = {
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -97,12 +135,10 @@ class PoetAgent(BaseAgent):
                 }
                 messages.append(tool_message)
 
-                # 保存 tool 消息到数据库
                 self.context.add_tool_message(tc["id"], tool_result)
                 await self.context.save_tool_message(tc["id"], tool_result)
 
-                # 提取诗词数据
-                if tc["name"] in ["search_poem", "get_poem_detail", "get_random_poem"]:
+                if tc["name"] in ["search_poem", "get_poem_detail"]:
                     extracted = self._extract_poem_data(tc["name"], tc["arguments"], tool_result)
                     if extracted:
                         poem_data = extracted
@@ -111,28 +147,27 @@ class PoetAgent(BaseAgent):
                             extracted.get("title", ""),
                             extracted.get("author", ""),
                         )
-                
-                # 记录用户画像更新
-                if tc["name"] == "update_user_profile":
-                    logger.info(f"User profile updated via poet agent: user={self.user_id}, result={tool_result}")
-                
-                # 记录学习进度
-                if tc["name"] == "record_learning_progress":
-                    logger.info(f"Learning progress recorded via poet agent: user={self.user_id}, result={tool_result}")
 
-            # 再次调用 LLM
-            messages = self.context.build_messages("")
+                if tc["name"] == "update_user_profile":
+                    logger.info(f"User profile updated: user={self.user_id}")
+
+                if tc["name"] == "record_learning_progress":
+                    logger.info(f"Learning progress recorded: user={self.user_id}")
+
+            messages = self.context.build_messages(
+                "",
+                system_prompt=self.get_system_prompt(),
+                skill_extension=skill_extension,
+                **dynamic_context,
+            )
             response = await chat_completion(messages, tools=tools if tools else None, **model_config)
             content = response["content"]
             tool_calls = response["tool_calls"]
 
-        # 最后统一保存一条 assistant 消息（避免重复记录）
         if all_tool_calls:
-            # 有工具调用，保存包含 tool_calls 和 content 的完整消息
             self.context.add_assistant_message(content=content, tool_calls=all_tool_calls)
             await self.context.save_assistant_message(content=content, tool_calls=all_tool_calls)
         elif content:
-            # 没有工具调用，只保存 content
             self.context.add_assistant_message(content=content)
             await self.context.save_assistant_message(content=content)
 
@@ -197,13 +232,6 @@ class PoetAgent(BaseAgent):
                         "author": poem.get("author", ""),
                     }
             elif tool_name == "get_poem_detail":
-                if isinstance(data, dict):
-                    return {
-                        "id": data.get("id"),
-                        "title": data.get("title", ""),
-                        "author": data.get("author", ""),
-                    }
-            elif tool_name == "get_random_poem":
                 if isinstance(data, dict):
                     return {
                         "id": data.get("id"),
@@ -388,7 +416,7 @@ async def run_agent(
             )
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": tool_result})
 
-            if tool_name in ["search_poem", "get_poem_detail", "get_random_poem"]:
+            if tool_name in ["search_poem", "get_poem_detail"]:
                 poem_data = {
                     "tool": tool_name,
                     "arguments": json.loads(arguments) if isinstance(arguments, str) else arguments,
