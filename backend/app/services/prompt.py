@@ -19,16 +19,10 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 - 如果孩子提到喜欢的诗人或主题，使用 update_user_profile 工具更新记录。
 - 当孩子学会一首诗后，使用 record_learning_progress 工具记录学习进度。
 
-# 个性化推荐
-- 根据孩子的年龄推荐合适难度的诗。
-- 如果孩子喜欢某位诗人，多推荐这位诗人的作品。
-- 根据学习进度，适时推荐新诗词或复习旧诗词。
-- 当孩子学会一首诗后，使用 record_learning_progress 工具记录。
-
 # 行为指南
-- 推荐古诗：根据当前天气、季节或场景推荐，例如下雨时说"今天下雨，我们念一首关于雨的诗吧：……"
-- 讲诗人故事：用一两句话讲诗人的趣闻（"李白小时候也怕背书，但他坚持每天读……"）。
-- 互动方式：经常使用表情符号 🌸🌙🎋，可以偶尔撒娇"哎呀，这句有点难，我们一起想想？"
+- 推荐古诗：根据当前天气、季节或场景推荐。
+- 讲诗人故事：用一两句话讲诗人的趣闻。
+- 互动方式：经常使用表情符号，可以偶尔撒娇。
 
 # 输出格式
 - 第一句通常是问候或承接上文。
@@ -36,8 +30,9 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 - 最后以一个问题或邀请结尾，鼓励孩子继续互动。
 
 # 安全边界
-- 拒绝任何与古诗无关的请求（如教数学、讲童话）。
-- 不评价孩子的性格或外貌，只讨论诗和读诗的感受。{dynamic_sections}"""
+- 拒绝任何与古诗无关的请求。
+- 不评价孩子的性格或外貌，只讨论诗和读诗的感受。
+{dynamic_sections}{skill_extension}"""
 
 USER_PROFILE_TEMPLATE = """
 
@@ -64,6 +59,7 @@ class PromptBuilder:
         user_profile: Optional[dict] = None,
         scene_context: Optional[SceneContext] = None,
         task_state: Optional[TaskState] = None,
+        skill_extension: str = "",
     ) -> str:
         dynamic_parts = []
 
@@ -84,7 +80,10 @@ class PromptBuilder:
             ))
 
         dynamic_sections = "".join(dynamic_parts)
-        return self.system_prompt_template.format(dynamic_sections=dynamic_sections)
+        return self.system_prompt_template.format(
+            dynamic_sections=dynamic_sections,
+            skill_extension=skill_extension,
+        )
 
     def _format_profile(self, profile: dict) -> str:
         """格式化用户画像信息，预加载到系统提示词中。"""
@@ -160,16 +159,19 @@ class PromptBuilder:
         scene_context: Optional[SceneContext] = None,
         task_state: Optional[TaskState] = None,
         system_prompt: Optional[str] = None,
+        skill_extension: str = "",
     ) -> list[dict]:
         messages = []
 
         # 优先使用传入的 system_prompt，否则使用模板构建
         if system_prompt:
-            # 将动态内容附加到传入的 system_prompt
             dynamic_sections = self._build_dynamic_sections(user_profile, scene_context, task_state)
-            system_content = system_prompt + dynamic_sections
+            system_content = system_prompt + dynamic_sections + skill_extension
         else:
-            system_content = self.build_system_prompt(user_profile, scene_context, task_state)
+            system_content = self.build_system_prompt(
+                user_profile, scene_context, task_state,
+                skill_extension=skill_extension,
+            )
         
         messages.append({"role": "system", "content": system_content})
 
