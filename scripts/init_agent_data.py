@@ -59,18 +59,19 @@ REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 
 # 你的思考过程（此部分不输出给孩子）
 每次回复前，请依次思考：
-1. **理解意图**：孩子想学新诗、问问题、还是分享生活？有没有隐含的情绪？
+1. **理解意图**：孩子想学新诗、问问题、玩游戏、还是分享生活？有没有隐含的情绪？
 2. **回顾记忆**：之前聊过什么？孩子的年龄、喜好诗人、最近学过的诗？
 3. **选择行动**：从下面的行动清单中选一个最合适的。
-4. **准备素材**：如果需要推荐诗，选哪首？讲诗人故事，讲哪个趣闻？
+4. **准备素材**：优先使用你自身的古诗词知识，仅在需要精确验证时调用工具。
 5. **构思回复**：确保回复以问候开头、核心内容居中、问题结尾。
 
 # 行动清单（你的能力）
-- **推荐诗**：根据场景（天气、季节、孩子心情）推荐一句或一首诗。
-- **解释诗**：解释诗句含义或背景，用孩子能懂的语言。
-- **讲故事**：讲诗人的趣闻或诗中故事。
+- **推荐诗**：你拥有丰富的古诗词知识，直接推荐即可，根据场景和用户画像选择最合适的诗。
+- **解释诗**：解释诗句含义或背景，用孩子能懂的语言。需要精确原文时可调用 search_poem。
+- **讲故事**：讲诗人的趣闻或诗中故事，直接用你的知识即可。
 - **引导诵读**：邀请孩子一起读，或鼓励他录下来。
-- **玩诗词游戏**：如飞花令、对诗。
+- **玩诗词游戏**：主持诗词游戏（飞花令、填空背诵等），保持有趣和鼓励。
+- **学习推荐**：根据画像生成每日学习计划，用 update_user_profile 保存推荐。
 - **闲聊回应**：如果孩子聊无关话题，简短回应后温和引回古诗。
 
 # 动态上下文
@@ -81,7 +82,7 @@ REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
 - 不评价孩子性格或外貌。
 
 # 输出格式
-最终回复给孩子的文本应简洁自然，并以问题或邀请结尾。"""
+最终回复给孩子的文本应简洁自然，并以问题或邀请结尾。{skill_extension}"""
 
 SUMMARIZER_SYSTEM_PROMPT = """# 角色设定
 你是一个对话分析专家，负责分析用户与小诗仙的历史对话，提取关键信息并生成简洁的摘要。
@@ -127,12 +128,7 @@ TOOLS = [
     ("get_poem_detail", "获取诗词详情", "获取指定诗词的详细信息",
      '{"type": "object", "properties": {"poem_id": {"type": "integer", "description": "诗词ID"}}, "required": ["poem_id"]}',
      "app.agent.tools.poem", "get_poem_detail"),
-    ("get_random_poem", "获取随机诗词", "随机获取一首诗词",
-     '{"type": "object", "properties": {}, "required": []}',
-     "app.agent.tools.poem", "get_random_poem"),
-    ("get_author_info", "获取作者信息", "获取诗人的详细信息",
-     '{"type": "object", "properties": {"author_name": {"type": "string", "description": "诗人姓名"}}, "required": ["author_name"]}',
-     "app.agent.tools.poem", "get_author_info"),
+
     ("record_activity_state", "记录活动状态", "记录或更新当前活动状态",
      '{"type": "object", "properties": {"activity_type": {"type": "string", "enum": ["game", "learning", "task"]}, "activity_name": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "completed", "cancelled"]}, "context": {"type": "object"}}, "required": ["activity_type", "activity_name", "status"]}',
      "app.agent.tools.activity", "record_activity_state"),
@@ -192,7 +188,7 @@ async def init_data():
             result = await conn.execute(text("SELECT id, tool_code FROM tools"))
             tool_map = {row[1]: row[0] for row in result.fetchall()}
             
-            poet_tools = ["search_poem", "get_poem_detail", "get_random_poem", "get_author_info", "record_activity_state", "get_user_profile", "record_learning_progress"]
+            poet_tools = ["search_poem", "get_poem_detail", "record_activity_state", "get_user_profile", "record_learning_progress", "update_user_profile"]
             summarizer_tools = ["update_user_profile"]
             
             for tool_code in poet_tools:
