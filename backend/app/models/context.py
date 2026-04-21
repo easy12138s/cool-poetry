@@ -64,6 +64,9 @@ class TaskState(BaseModel):
     last_poem_id: Optional[int] = None
     last_poem_title: Optional[str] = None
     last_poem_author: Optional[str] = None
+    skill_name: str = "chat"
+    game_state: Dict[str, Any] = Field(default_factory=dict)
+    daily_plan: Dict[str, Any] = Field(default_factory=dict)
 
     def update(self, **kwargs) -> None:
         for key, value in kwargs.items():
