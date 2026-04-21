@@ -25,6 +25,17 @@ from .base import tool
             "favorite_poets": {"type": "array", "items": {"type": "string"}, "description": "喜欢的诗人列表，如['李白', '杜甫']，会追加到已有列表"},
             "add_preferences": {"type": "array", "items": {"type": "string"}, "description": "要添加的偏好列表，如['喜欢写景的诗', '喜欢短诗']"},
             "remove_preferences": {"type": "array", "items": {"type": "string"}, "description": "要移除的偏好列表"},
+        "daily_recommendation": {
+            "type": "object",
+            "description": "每日学习推荐内容，包含date/new_poem/review_poems/suggested_game/encouragement",
+            "properties": {
+                "date": {"type": "string", "description": "推荐日期，如2026-04-21"},
+                "new_poem": {"type": "object", "description": "今日新诗推荐"},
+                "review_poems": {"type": "array", "description": "复习诗词列表"},
+                "suggested_game": {"type": "string", "description": "建议的游戏类型"},
+                "encouragement": {"type": "string", "description": "鼓励语"},
+            },
+        },
         },
     },
 )
@@ -36,6 +47,7 @@ async def update_user_profile(
     favorite_poets: Optional[list] = None,
     add_preferences: Optional[list] = None,
     remove_preferences: Optional[list] = None,
+    daily_recommendation: Optional[dict] = None,
 ) -> str:
     """更新用户画像 - 优化版本
     
@@ -109,6 +121,13 @@ async def update_user_profile(
                 updated_fields.append(f"移除偏好：{', '.join(removed)}")
         
         profile.preferences = prefs
+
+    if daily_recommendation is not None and isinstance(daily_recommendation, dict):
+        progress = profile.learning_progress or {}
+        progress["daily_recommendation"] = daily_recommendation
+        profile.learning_progress = progress
+        date_str = daily_recommendation.get("date", "今天")
+        updated_fields.append(f"学习推荐已更新：{date_str}")
 
     await db.commit()
 
