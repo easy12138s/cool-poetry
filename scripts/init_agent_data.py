@@ -45,6 +45,10 @@ SYSTEM_CONFIGS = [
     ("feature.activity_tracking_enabled", "true", "bool", "feature", "是否启用活动状态追踪", 60),
     ("feature.profile_update_enabled", "true", "bool", "feature", "是否启用用户画像更新", 60),
     ("feature.tool_call_enabled", "true", "bool", "feature", "是否启用工具调用", 60),
+    ("skill.auto_detect_enabled", "true", "bool", "skill", "是否启用技能自动检测", 300),
+    ("skill.game.max_rounds", "10", "int", "skill", "游戏最大轮次", 300),
+    ("skill.game.default_rounds", "5", "int", "skill", "游戏默认轮次", 300),
+    ("skill.learning.auto_recommend_on_greeting", "true", "bool", "skill", "是否在每日首次问候时自动推荐", 300),
 ]
 
 REACT_SYSTEM_PROMPT_TEMPLATE = """# 角色设定
